@@ -1,0 +1,7 @@
+/out
+/build
+/install
+/.vs
+.DS_Store
+build-MSVC.bat
+CMakeSettings.json
