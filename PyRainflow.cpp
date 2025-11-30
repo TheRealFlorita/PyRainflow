@@ -702,7 +702,7 @@ PyObject* __stdcall PyShift2ndLane(PyObject* histories_l1, PyObject* histories_l
 	/* Predefine output */
 	PyObject* output = PyTuple_New(2);
 
-	/* Get number of stress histories per lane */
+	/* Get number of stress histories per lane/track */
 	size_t n_his_lane1 = PyList_Size(histories_l1);
 	size_t n_his_lane2 = PyList_Size(histories_l2);
 
@@ -727,27 +727,28 @@ PyObject* __stdcall PyShift2ndLane(PyObject* histories_l1, PyObject* histories_l
 		}
 
 	/* Define range */
-	size_t his_range = his_length;
+	long long i_step = size_t(max(1, step));
+	long long i_range = floor(his_length / i_step) * i_step;
 	if (range > 0)
-		size_t his_range = min(range, his_length);
-	size_t his_total = his_range + his_length;
+		long long i_range = min(ceil(range/ i_step)* i_step, i_range);
+	size_t tot_length = i_range + his_length;
 
-	/* Get averaged stress history for lane 1, rotated by one length */
-	vector<double> shis_lane1(his_total, 0.0);
+	/* Get averaged stress history for lane/track 1, rotated by one i_range */
+	vector<double> shis_lane1(tot_length, 0.0);
+	double sf1 = double(n_his_lane1);
 	for (size_t i = 0; i < n_his_lane1; ++i)
 	{
-		double sf1 = double(n_his_lane1);
 		PyObject* py_his = PyList_GetItem(histories_l1, i);
 
 		for (size_t j = 0; j < his_length; ++j)
-			shis_lane1[j + his_range] += PyFloat_AsDouble(PyList_GetItem(py_his, j)) / sf1;
+			shis_lane1[j + i_range] += PyFloat_AsDouble(PyList_GetItem(py_his, j)) / sf1;
 	}
 
-	/* Get averaged stress history for lane 2 */
-	vector<double> shis_lane2(his_total, 0.0);
+	/* Get averaged stress history for lane/track 2, not rotated */
+	vector<double> shis_lane2(tot_length, 0.0);
+	double sf2 = double(n_his_lane2);
 	for (size_t i = 0; i < n_his_lane2; ++i)
 	{
-		double sf2 = double(n_his_lane2);
 		PyObject* py_his = PyList_GetItem(histories_l2, i);
 
 		for (size_t j = 0; j < his_length; ++j)
@@ -755,20 +756,18 @@ PyObject* __stdcall PyShift2ndLane(PyObject* histories_l1, PyObject* histories_l
 	}
 
 	/* Sum averaged stress histories */
-	vector<double> shis_sum(his_total, 0.0);
+	vector<double> shis_sum(tot_length, 0.0);
 	for (size_t j = 0; j < shis_sum.size(); ++j)
 		shis_sum[j] = shis_lane1[j] + shis_lane2[j];
 
 	/* Start values for maximum stress delta and shift value */
 	double delta_max = *max_element(shis_sum.begin(), shis_sum.end()) - *min_element(shis_sum.begin(), shis_sum.end());
-    long long i_max = -1 * (long long)(his_range);
+    long long i_max = -1 * (long long)(i_range);
 
-	/* Rotate each lane with fixed stepsize in opposite directions */
-    size_t i_step = size_t(max(1, step));
-
-	for (size_t i = 0; i < his_range; i += i_step)
+	/* Rotate each lane/track with fixed step size in opposite directions */
+	for (long long i = 0; i < i_range; i += i_step)
 	{
-		/* Rotate/shift values of lane 1 by stepsize */
+		/* Rotate/shift values of lane/track 1 by step size */
 		rotate(shis_lane1.begin(), shis_lane1.begin() + i_step, shis_lane1.end());
 
 		/* Recalculate sum of averaged stress histories */
@@ -777,7 +776,7 @@ PyObject* __stdcall PyShift2ndLane(PyObject* histories_l1, PyObject* histories_l
 
 		/* Calculate maximum stress delta at current position */
 		double delta = mRound(*max_element(shis_sum.begin(), shis_sum.end()) - *min_element(shis_sum.begin(), shis_sum.end()));
-        long long i_cur = long long(i * 2 + i_step) - (long long)(his_range);
+        long long i_cur = 2 * i + i_step - i_range;
 
 		/* Save current position if stress delta is larger than current max */
 		if (delta > delta_max)
@@ -789,7 +788,7 @@ PyObject* __stdcall PyShift2ndLane(PyObject* histories_l1, PyObject* histories_l
 		else if ((delta == delta_max) && (abs(i_cur) < abs(i_max)))
 			i_max = i_cur;
 
-		/* Rotate/shift values of lane 1 by stepsize, in opposite direction */
+		/* Rotate/shift values of lane/track 1 by step size, in opposite direction */
 		rotate(shis_lane2.rbegin(), shis_lane2.rbegin() + i_step, shis_lane2.rend());
 
 		/* Recalculate sum of averaged stress histories */
@@ -798,7 +797,7 @@ PyObject* __stdcall PyShift2ndLane(PyObject* histories_l1, PyObject* histories_l
 
 		/* Calculate maximum stress delta at current position */
 		delta = mRound(*max_element(shis_sum.begin(), shis_sum.end()) - *min_element(shis_sum.begin(), shis_sum.end()));
-		i_cur = (long long)(i + i_step) * 2 - (long long)(his_range);
+		i_cur += i_step;
 
 		/* Save current position if stress delta is larger than current max */
 		if (delta > delta_max)
