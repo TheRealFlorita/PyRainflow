@@ -58,7 +58,7 @@ static bool isPeaksOnly(vector<double>& peaks)
 }
 
 
-static vector<double> filterPeaks(vector<double> &values)
+static vector<double> getPeaks(vector<double> &values)
 {	
 	/* Escape if vector contains only peaks */
 	if (isPeaksOnly(values))
@@ -78,16 +78,17 @@ static vector<double> filterPeaks(vector<double> &values)
 
 	/* Locate turning points and add to peaks vector */
 	peaks.reserve(values.size());
-	peaks.emplace_back(values[0]);
 
 	for (size_t i = 1; i < values.size() - 1; ++i)
 	{
 		double delta1 = values[i] - values[i - 1];
 		double delta2 = values[i + 1] - values[i];
 
-		if ((abs(delta1) > 0.0) && ((delta1*delta2) <= 0.0))
+		if ((abs(delta1) > 0.0) && (delta1*delta2 <= 0.0))
 		{
-			if (peaks.size() >= 2)
+			if (peaks.size() == 0)
+				peaks.emplace_back(values[i - 1]);
+			else if (peaks.size() >= 2)
 			{
 				double point1 = peaks[peaks.size() - 2];
 				double point2 = peaks.back();
@@ -109,7 +110,7 @@ static vector<double> filterPeaks(vector<double> &values)
 }
 
 
-static vector<double> filterPeaks(PyObject* values)
+static vector<double> getPeaks(PyObject* values)
 {
 	/* Convert PyList to std::vector */
 	size_t psize = PyList_Size(values);
@@ -119,13 +120,13 @@ static vector<double> filterPeaks(PyObject* values)
 	for (size_t i = 0; i < psize; ++i)
 		peaks.emplace_back(PyFloat_AsDouble(PyList_GetItem(values, i)));
 
-	return filterPeaks(peaks);
+	return getPeaks(peaks);
 }
 
 
-PyObject* __stdcall PyFilterPeaks(PyObject* values)
+PyObject* __stdcall PyGetPeaks(PyObject* values)
 {
-	vector<double> peaks = filterPeaks(values);
+	vector<double> peaks = getPeaks(values);
 
 	PyObject* output = PyList_New(peaks.size());
 	for (int i = 0; i < peaks.size(); ++i)
@@ -138,7 +139,7 @@ PyObject* __stdcall PyFilterPeaks(PyObject* values)
 static vector<double> rotatePeaks(vector<double> &peaks)
 {
 	/* Ensure the data only contains turning points */
-	peaks = filterPeaks(peaks);
+	peaks = getPeaks(peaks);
 
 	/* Rotate vector such that it starts with the absolute maximum value */
 	if (peaks.size() > 2)
@@ -169,14 +170,109 @@ static vector<double> rotatePeaks(vector<double> &peaks)
 		peaks.emplace_back(peaks[0]);
 	}
 
-    return filterPeaks(peaks);
+    return getPeaks(peaks);
+}
+
+
+PyObject* __stdcall PyGetPeakLocations(PyObject* xpositions, PyObject* yvalues)
+{
+	/* Predefine output */
+	PyObject* output = PyTuple_New(2);
+
+	/* Get sizes */
+	size_t psize = PyList_Size(xpositions);
+	if (psize != size_t(PyList_Size(yvalues)) || psize <= 2)
+	{
+		if (psize != size_t(PyList_Size(yvalues)))
+			cerr << "Positions and values have different lengths!" << endl;
+
+		PyTuple_SetItem(output, 0, xpositions);
+		PyTuple_SetItem(output, 1, yvalues);
+		return output;
+	}
+
+	/* Convert PyList to std::vector */
+	vector<double> positions;
+	positions.reserve(psize);
+
+	for (size_t i = 0; i < psize; ++i)
+		positions.emplace_back(PyFloat_AsDouble(PyList_GetItem(xpositions, i)));
+
+	/* Convert PyList to std::vector */
+	vector<double> values;
+	values.reserve(psize);
+
+	for (size_t i = 0; i < psize; ++i)
+		values.emplace_back(PyFloat_AsDouble(PyList_GetItem(yvalues, i)));
+
+	/* Create vectors */
+	vector<double> locations;
+	locations.reserve(psize);
+
+	vector<double> peaks;
+	peaks.reserve(psize);
+
+	/* Locate turning points and add to peaks vector */
+	for (size_t i = 1; i < values.size() - 1; ++i)
+	{
+		double delta1 = values[i] - values[i - 1];
+		double delta2 = values[i + 1] - values[i];
+
+		if ((abs(delta1) > 0.0) && (delta1 * delta2 <= 0.0))
+		{
+			if (peaks.size() == 0)
+			{
+				locations.emplace_back(positions[i - 1]);
+				peaks.emplace_back(values[i - 1]);
+			}
+			else if (peaks.size() >= 2)
+			{
+				double point1 = peaks[peaks.size() - 2];
+				double point2 = peaks.back();
+				double point3 = values[i];
+
+				if (point2 >= min(point1, point3) && point2 <= max(point1, point3))
+				{
+					locations.pop_back();
+					peaks.pop_back();
+				}
+			}
+
+			locations.emplace_back(positions[i]);
+			peaks.emplace_back(values[i]);
+		}
+	}
+
+	/* Add last value to peaks vector if delta is non-zero */
+	double delta = values.back() - peaks.back();
+	if (abs(delta) > 0.0)
+	{
+		locations.emplace_back(positions.back());
+		peaks.emplace_back(values.back());
+	}
+
+	/* Output */
+	psize = locations.size();
+	PyObject* locs = PyList_New(psize);
+	PyObject* pks = PyList_New(psize);
+
+	for (size_t i = 0; i < psize; ++i)
+	{
+		PyList_SetItem(locs, i, PyFloat_FromDouble(locations[i]));
+		PyList_SetItem(pks, i, PyFloat_FromDouble(peaks[i]));
+	}
+
+	PyTuple_SetItem(output, 0, locs);
+	PyTuple_SetItem(output, 1, pks);
+
+	return output;
 }
 
 
 static void rainflow3Points(vector<double>& peaks, map<pair<double,double>, double>& cycles)
 {
 	/* Ensure the data only contains turning points */
-	peaks = filterPeaks(peaks);
+	peaks = getPeaks(peaks);
 
 	/* Create temporary vector */
 	vector<double> rs;
@@ -232,7 +328,7 @@ static void rainflow3Points(vector<double>& peaks, map<pair<double,double>, doub
 static vector<double> rainflow4Points(vector<double>& peaks, map<pair<double,double>,double>& cycles, bool residu = true, size_t multiplier = 1)
 {
 	/* Ensure the data only contains turning points */
-	peaks = filterPeaks(peaks);
+	peaks = getPeaks(peaks);
 
 	/* Create temporary vector */
 	vector<double> rs;
@@ -278,7 +374,7 @@ PyObject* __stdcall PyRainflowCounting(PyObject* values, int algorithm, double t
 	CUTOFF = max<double>(cutoff, 1e-9);
 
 	/* Filter peaks and valleys */
-	vector<double> peaks = filterPeaks(values);
+	vector<double> peaks = getPeaks(values);
 
 	/* Rainflow counting */
 	map<pair<double,double>, double> cycles;
@@ -302,19 +398,23 @@ PyObject* __stdcall PyRainflowCounting(PyObject* values, int algorithm, double t
 	}
 
 	/* Output */
-	PyObject* output = PyList_New(Py_ssize_t(cycles.size()));
+	PyObject* rdelta = PyList_New(Py_ssize_t(cycles.size()));
+	PyObject* rmean = PyList_New(Py_ssize_t(cycles.size()));
+	PyObject* rcount = PyList_New(Py_ssize_t(cycles.size()));
 
 	size_t i = 0;
     for (map<pair<double,double>,double>::iterator itr = cycles.begin(); itr != cycles.end(); ++itr)
 	{
-		PyObject* icycle = PyList_New(3);
-		PyList_SetItem(icycle, 0, PyFloat_FromDouble(itr->first.first));
-		PyList_SetItem(icycle, 1, PyFloat_FromDouble(itr->first.second));
-        PyList_SetItem(icycle, 2, PyFloat_FromDouble(itr->second));
-
-		PyList_SetItem(output, i, icycle);
+		PyList_SetItem(rdelta, i, PyFloat_FromDouble(itr->first.first));
+		PyList_SetItem(rmean, i, PyFloat_FromDouble(itr->first.second));
+        PyList_SetItem(rcount, i, PyFloat_FromDouble(itr->second));
 		++i;
 	}
+	PyObject* output = PyTuple_New(3);
+	PyTuple_SetItem(output, 0, rdelta);
+	PyTuple_SetItem(output, 1, rmean);
+	PyTuple_SetItem(output, 2, rcount);
+
 	return output;
 }
 
@@ -442,7 +542,7 @@ PyObject* __stdcall PyRainflowCountingRandomOrder(PyObject* histories, double to
 	{
 		PyObject* item = PyList_GetItem(histories, i);
         size_t nmul = PyLong_AsUnsignedLongLong(PyList_GetItem(item, 0));
-		vector<double> values = filterPeaks(PyList_GetItem(item, 1));
+		vector<double> values = getPeaks(PyList_GetItem(item, 1));
 
 		/* Iterate through turning points */
 		unique_ptr<vector<double>> rs = make_unique<vector<double>>(rainflow4Points(values, cycles, false, nmul));
@@ -530,7 +630,7 @@ PyObject* __stdcall PyRainflowCountingRandomOrder(PyObject* histories, double to
 		{
 			/* Get stress history */
 			PyObject* item = PyList_GetItem(histories, ihistories[i]);
-			vector<double> peaks = filterPeaks(PyList_GetItem(item, 1));
+			vector<double> peaks = getPeaks(PyList_GetItem(item, 1));
 			
 			/* Append stress history */
 			v_allpeaks.insert(v_allpeaks.end(), peaks.begin(), peaks.end());
@@ -573,32 +673,34 @@ PyObject* __stdcall PyRainflowCountingRandomOrder(PyObject* histories, double to
 	}
 
 	/* Output */
-	PyObject* output = PyList_New(Py_ssize_t(cycles.size()));
+	PyObject* rdelta = PyList_New(Py_ssize_t(cycles.size()));
+	PyObject* rmean = PyList_New(Py_ssize_t(cycles.size()));
+	PyObject* rcount = PyList_New(Py_ssize_t(cycles.size()));
 
 	size_t i = 0;
-    for (map<pair<double,double>,double>::iterator itr = cycles.begin(); itr != cycles.end(); ++itr)
+	for (map<pair<double, double>, double>::iterator itr = cycles.begin(); itr != cycles.end(); ++itr)
 	{
-		PyObject* icycle = PyList_New(3);
-		PyList_SetItem(icycle, 0, PyFloat_FromDouble(itr->first.first));
-		PyList_SetItem(icycle, 1, PyFloat_FromDouble(itr->first.second));
-		PyList_SetItem(icycle, 2, PyFloat_FromDouble(itr->second));
-
-		PyList_SetItem(output, i, icycle);
+		PyList_SetItem(rdelta, i, PyFloat_FromDouble(itr->first.first));
+		PyList_SetItem(rmean, i, PyFloat_FromDouble(itr->first.second));
+		PyList_SetItem(rcount, i, PyFloat_FromDouble(itr->second));
 		++i;
 	}
+	PyObject* output = PyTuple_New(3);
+	PyTuple_SetItem(output, 0, rdelta);
+	PyTuple_SetItem(output, 1, rmean);
+	PyTuple_SetItem(output, 2, rcount);
+
 	return output;
 }
 
 
-PyObject* __stdcall PyShift2ndLane(PyObject* histories_l1, PyObject* histories_l2, int step, double tolerance)
+PyObject* __stdcall PyShift2ndLane(PyObject* histories_l1, PyObject* histories_l2, int step, int range, double tolerance)
 {
 	/* Define tolerance for rounding  */
 	TOL = max<double>(tolerance, 1e-9);
 
 	/* Predefine output */
-	PyObject* output = PyList_New(2);
-	PyList_SetItem(output, 0, PyFloat_FromDouble(0.0));
-	PyList_SetItem(output, 1, PyLong_FromLongLong(0));
+	PyObject* output = PyTuple_New(2);
 
 	/* Get number of stress histories per lane */
 	size_t n_his_lane1 = PyList_Size(histories_l1);
@@ -611,6 +713,9 @@ PyObject* __stdcall PyShift2ndLane(PyObject* histories_l1, PyObject* histories_l
 		if (his_length != PyList_Size(PyList_GetItem(histories_l1, i)))
 		{
 			cerr << "Different lengths of stress histories!" << endl;
+
+			PyTuple_SetItem(output, 0, PyFloat_FromDouble(0.0));
+			PyTuple_SetItem(output, 1, PyLong_FromLongLong(0));
 			return output;
 		}
 
@@ -623,20 +728,23 @@ PyObject* __stdcall PyShift2ndLane(PyObject* histories_l1, PyObject* histories_l
 
 	/* Define range */
 	size_t his_range = his_length;
+	if (range > 0)
+		size_t his_range = min(range, his_length);
+	size_t his_total = his_range + his_length;
 
 	/* Get averaged stress history for lane 1, rotated by one length */
-	vector<double> shis_lane1(2*his_length, 0.0);
+	vector<double> shis_lane1(his_total, 0.0);
 	for (size_t i = 0; i < n_his_lane1; ++i)
 	{
 		double sf1 = double(n_his_lane1);
 		PyObject* py_his = PyList_GetItem(histories_l1, i);
 
 		for (size_t j = 0; j < his_length; ++j)
-			shis_lane1[j + his_length] += PyFloat_AsDouble(PyList_GetItem(py_his, j)) / sf1;
+			shis_lane1[j + his_range] += PyFloat_AsDouble(PyList_GetItem(py_his, j)) / sf1;
 	}
 
 	/* Get averaged stress history for lane 2 */
-	vector<double> shis_lane2(2*his_length, 0.0);
+	vector<double> shis_lane2(his_total, 0.0);
 	for (size_t i = 0; i < n_his_lane2; ++i)
 	{
 		double sf2 = double(n_his_lane2);
@@ -646,19 +754,19 @@ PyObject* __stdcall PyShift2ndLane(PyObject* histories_l1, PyObject* histories_l
 			shis_lane2[j] += PyFloat_AsDouble(PyList_GetItem(py_his, j)) / sf2;
 	}
 
-	/* Sum averaged stress histories, currently no overlap */
-	vector<double> shis_sum(2*his_length, 0.0);
+	/* Sum averaged stress histories */
+	vector<double> shis_sum(his_total, 0.0);
 	for (size_t j = 0; j < shis_sum.size(); ++j)
 		shis_sum[j] = shis_lane1[j] + shis_lane2[j];
 
 	/* Start values for maximum stress delta and shift value */
 	double delta_max = *max_element(shis_sum.begin(), shis_sum.end()) - *min_element(shis_sum.begin(), shis_sum.end());
-    long long i_max = -1 * (long long)(his_length);
+    long long i_max = -1 * (long long)(his_range);
 
 	/* Rotate each lane with fixed stepsize in opposite directions */
     size_t i_step = size_t(max(1, step));
 
-	for (size_t i = 0; i < his_length; i += i_step)
+	for (size_t i = 0; i < his_range; i += i_step)
 	{
 		/* Rotate/shift values of lane 1 by stepsize */
 		rotate(shis_lane1.begin(), shis_lane1.begin() + i_step, shis_lane1.end());
@@ -669,7 +777,7 @@ PyObject* __stdcall PyShift2ndLane(PyObject* histories_l1, PyObject* histories_l
 
 		/* Calculate maximum stress delta at current position */
 		double delta = mRound(*max_element(shis_sum.begin(), shis_sum.end()) - *min_element(shis_sum.begin(), shis_sum.end()));
-        long long i_cur = long long(i * 2 + i_step) - (long long)(his_length);
+        long long i_cur = long long(i * 2 + i_step) - (long long)(his_range);
 
 		/* Save current position if stress delta is larger than current max */
 		if (delta > delta_max)
@@ -690,7 +798,7 @@ PyObject* __stdcall PyShift2ndLane(PyObject* histories_l1, PyObject* histories_l
 
 		/* Calculate maximum stress delta at current position */
 		delta = mRound(*max_element(shis_sum.begin(), shis_sum.end()) - *min_element(shis_sum.begin(), shis_sum.end()));
-		i_cur = (long long)(i + i_step) * 2 - (long long)(his_length);
+		i_cur = (long long)(i + i_step) * 2 - (long long)(his_range);
 
 		/* Save current position if stress delta is larger than current max */
 		if (delta > delta_max)
@@ -704,8 +812,8 @@ PyObject* __stdcall PyShift2ndLane(PyObject* histories_l1, PyObject* histories_l
 	}
 
 	/* Set return values */
-	PyList_SetItem(output, 0, PyFloat_FromDouble(delta_max));
-	PyList_SetItem(output, 1, PyLong_FromLongLong(i_max));
+	PyTuple_SetItem(output, 0, PyFloat_FromDouble(delta_max));
+	PyTuple_SetItem(output, 1, PyLong_FromLongLong(i_max));
 
 	return output;
 }

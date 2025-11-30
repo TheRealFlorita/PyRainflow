@@ -1,6 +1,7 @@
 LIBRARY "PyRainflow"
 EXPORTS
-PyFilterPeaks
+PyGetPeaks
+PyGetPeakLocations
 PyRainflowCounting
 PyRainflowCountingRandomOrder
 PyShift2ndLane

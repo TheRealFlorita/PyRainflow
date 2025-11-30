@@ -5,8 +5,8 @@ import ctypes
 # Load dll and functions
 PyRainflowDLL = ctypes.PyDLL(os.path.join(os.path.dirname(__file__),'PyRainflow.dll'))
 
-PyRainflowDLL.PyFilterPeaks.argtypes = (ctypes.py_object, )
-PyRainflowDLL.PyFilterPeaks.restype = ctypes.py_object
+PyRainflowDLL.PyGetPeaks.argtypes = (ctypes.py_object, )
+PyRainflowDLL.PyGetPeaks.restype = ctypes.py_object
 
 PyRainflowDLL.PyRainflowCounting.argtypes = (ctypes.py_object, ctypes.c_int, ctypes.c_double, ctypes.c_double)
 PyRainflowDLL.PyRainflowCounting.restype = ctypes.py_object
@@ -16,13 +16,13 @@ PyRainflowDLL.PyRainflowCountingRandomOrder.restype = ctypes.py_object
 
 
 # Python wrapper functions
-def PyFilterPeaks(values):
+def PyGetPeaks(values):
     if not isinstance(values, list):
         raise TypeError('Expected a list object')
         
     global PyRainflowDLL
 
-    return PyRainflowDLL.PyFilterPeaks(values)
+    return PyRainflowDLL.PyGetPeaks(values)
 
 
 def PyRainflowCounting(values, algorithm='4-points', tolerance=1e-3, cutoff=1e-1):
@@ -41,11 +41,8 @@ def PyRainflowCounting(values, algorithm='4-points', tolerance=1e-3, cutoff=1e-1
     elif algorithm.lower() == '3-points':
         alg_enum = 2
 
-    output = PyRainflowDLL.PyRainflowCounting(values, alg_enum, tolerance, cutoff)
+    sigmaDelta, sigmaMean, cycleCount = PyRainflowDLL.PyRainflowCounting(values, alg_enum, tolerance, cutoff)
 
-    sigma_delta = [item[0] for item in output]
-    sigma_mean =  [item[1] for item in output]
-    cycle_count = [item[2] for item in output]
     return sigma_delta, sigma_mean, cycle_count
 
 
@@ -63,9 +60,6 @@ def PyRainflowCountingRandomOrder(data, tolerance=1e-3, cutoff=1e-1):
     randomise = True
     verify = False
 
-    output = PyRainflowDLL.PyRainflowCountingRandomOrder(data, tolerance, cutoff, randomise, verify)
+    sigmaDelta, sigmaMean, cycleCount = PyRainflowDLL.PyRainflowCountingRandomOrder(data, tolerance, cutoff, randomise, verify)
 
-    sigma_delta = [item[0] for item in output]
-    sigma_mean =  [item[1] for item in output]
-    cycle_count = [item[2] for item in output]
     return sigma_delta, sigma_mean, cycle_count
