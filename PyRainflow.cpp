@@ -730,7 +730,7 @@ PyObject* __stdcall PyShift2ndLane(PyObject* histories_l1, PyObject* histories_l
 	long long i_step = size_t(max(1, step));
 	long long i_range = floor(his_length / i_step) * i_step;
 	if (range > 0)
-		long long i_range = min(ceil(range/ i_step)* i_step, i_range);
+		i_range = min(ceil(range/ i_step)* i_step, i_range);
 	size_t tot_length = i_range + his_length;
 
 	/* Get averaged stress history for lane/track 1, rotated by one i_range */
