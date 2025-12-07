@@ -12,7 +12,7 @@ set(${CMAKE_INSTALL_PREFIX} "${CMAKE_CURRENT_SOURCE_DIR}/install/")
 
 # Source groups
 set(Headers "PyRainflow.h")
-set(Sources "DllMain.cpp" "PyRainflow.cpp" "Source.def")
+set(Sources "PyRainflow.cpp" "Source.def")
 
 # Target
 add_library(${PROJECT_NAME} SHARED ${Headers} ${Sources})
