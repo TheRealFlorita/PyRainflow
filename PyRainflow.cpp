@@ -7,8 +7,36 @@
 
 PyRainflow::PyRainflow(double tolerance, double cutoff)
 {
-	roundingTolerance = std::max<double>(1e-16, tolerance);
-	deltaCutOff = std::max<double>(1e-16, cutoff);
+	setTolerance(tolerance);
+	setCutOff(cutoff);
+};
+
+
+PyRainflow::PyRainflow(PyObject* values, double tolerance, double cutoff)
+{
+	setTolerance(tolerance);
+	setCutOff(cutoff);
+
+	peaks = getPeaks(values);
+};
+
+
+PyRainflow::PyRainflow(std::vector<double>& values, double tolerance, double cutoff)
+{
+	setTolerance(tolerance);
+	setCutOff(cutoff);
+
+	peaks = getPeaks(values);
+};
+
+
+PyRainflow::PyRainflow(std::vector<double>& values, std::map<std::pair<double, double>, double>& counts, double tolerance, double cutoff)
+{
+	setTolerance(tolerance);
+	setCutOff(cutoff);
+
+	peaks = getPeaks(values);
+	cycles = counts;
 };
 
 
@@ -27,9 +55,9 @@ void PyRainflow::setCutOff(double cutoff)
 };
 
 
-double PyRainflow::round(double val)
+double PyRainflow::round(double value)
 {
-	return std::round(val / roundingTolerance) * roundingTolerance;
+	return std::round(value / roundingTolerance) * roundingTolerance;
 }
 
 
@@ -43,7 +71,40 @@ size_t PyRainflow::getAvailablePhysicalMemory()
 }
 
 
-bool PyRainflow::isPeaksOnly(std::vector<double>& peaks)
+void PyRainflow::addCycles(std::map<std::pair<double, double>, double>& counts)
+{
+	for (std::map<std::pair<double, double>, double>::iterator itr = counts.begin(); itr != counts.end(); ++itr)
+		cycles[itr->first] += itr->second;
+
+	return;
+}
+
+
+bool PyRainflow::isPeaksOnly(std::vector<double>& values)
+{
+	/* Deal with vector size of two */
+	if (values.size() == 2)
+	{
+		if (values[0] == values[1])
+			return false;
+	}
+	/* Check for opposing signs of delta's between 3 points */
+	else if (values.size() > 2)
+	{
+		for (size_t i = 1; i < values.size() - 1; ++i)
+		{
+			double delta1 = values[i] - values[i - 1];
+			double delta2 = values[i + 1] - values[i];
+
+			if ((delta1 * delta2) >= 0.0)
+				return false;
+		}
+	}
+	return true;
+}
+
+
+bool PyRainflow::isPeaksOnly()
 {
 	/* Deal with vector size of two */
 	if (peaks.size() == 2)
@@ -73,7 +134,82 @@ std::vector<double> PyRainflow::getPeaks(std::vector<double>& values)
 	if (isPeaksOnly(values))
 		return values;
 
-	std::vector<double> peaks;
+	std::vector<double> rpeaks;
+
+	/* Deal with small-sized vectors */
+	if (values.size() <= 2)
+	{
+		rpeaks.insert(rpeaks.end(), values.begin(), values.end());
+		if (values.size() == 2)
+			if (values[0] == values[1])
+				rpeaks.pop_back();
+		return rpeaks;
+	}
+
+	/* Locate turning points and add to peaks vector */
+	rpeaks.reserve(values.size());
+
+	for (size_t i = 1; i < values.size() - 1; ++i)
+	{
+		double delta1 = values[i] - values[i - 1];
+		double delta2 = values[i + 1] - values[i];
+
+		if ((std::abs(delta1) > 0.0) && (delta1 * delta2 <= 0.0))
+		{
+			if (rpeaks.size() == 0)
+				rpeaks.emplace_back(values[i - 1]);
+			else if (rpeaks.size() >= 2)
+			{
+				double point1 = rpeaks[rpeaks.size() - 2];
+				double point2 = rpeaks.back();
+				double point3 = values[i];
+
+				if (point2 >= std::min<double>(point1, point3) && point2 <= std::max<double>(point1, point3))
+					rpeaks.pop_back();
+			}
+			rpeaks.emplace_back(values[i]);
+		}
+	}
+
+	/* Add last value to peaks vector if delta is non-zero */
+	double delta = values.back() - rpeaks.back();
+	if (std::abs(delta) > 0.0)
+		rpeaks.emplace_back(values.back());
+
+	return rpeaks;
+}
+
+
+std::vector<double> PyRainflow::getPeaks(PyObject* values)
+{
+	/* Convert PyList to std::vector */
+	size_t psize = PyList_Size(values);
+	std::vector<double> rpeaks;
+	rpeaks.reserve(psize);
+
+	for (size_t i = 0; i < psize; ++i)
+		rpeaks.emplace_back(PyFloat_AsDouble(PyList_GetItem(values, i)));
+
+	return getPeaks(rpeaks);
+}
+
+
+void PyRainflow::setPeaks(std::vector<double>& values)
+{
+	peaks = getPeaks(values);
+	return;
+}
+
+
+void PyRainflow::filterPeaks()
+{
+	/* Escape if vector contains only peaks */
+	if (isPeaksOnly())
+		return;
+
+	/* Reset vector */
+	std::vector<double> values = peaks;
+	peaks.clear();
 
 	/* Deal with small-sized vectors */
 	if (values.size() <= 2)
@@ -82,12 +218,10 @@ std::vector<double> PyRainflow::getPeaks(std::vector<double>& values)
 		if (values.size() == 2)
 			if (values[0] == values[1])
 				peaks.pop_back();
-		return peaks;
+		return;
 	}
 
 	/* Locate turning points and add to peaks vector */
-	peaks.reserve(values.size());
-
 	for (size_t i = 1; i < values.size() - 1; ++i)
 	{
 		double delta1 = values[i] - values[i - 1];
@@ -115,28 +249,14 @@ std::vector<double> PyRainflow::getPeaks(std::vector<double>& values)
 	if (std::abs(delta) > 0.0)
 		peaks.emplace_back(values.back());
 
-	return peaks;
+	return;
 }
 
 
-std::vector<double> PyRainflow::getPeaks(PyObject* values)
-{
-	/* Convert PyList to std::vector */
-	size_t psize = PyList_Size(values);
-	std::vector<double> peaks;
-	peaks.reserve(psize);
-
-	for (size_t i = 0; i < psize; ++i)
-		peaks.emplace_back(PyFloat_AsDouble(PyList_GetItem(values, i)));
-
-	return getPeaks(peaks);
-}
-
-
-std::vector<double> PyRainflow::rotatePeaks(std::vector<double>& peaks)
+void PyRainflow::rotatePeaks()
 {
 	/* Ensure the data only contains turning points */
-	peaks = getPeaks(peaks);
+	filterPeaks();
 
 	/* Rotate vector such that it starts with the absolute maximum value */
 	if (peaks.size() > 2)
@@ -167,17 +287,20 @@ std::vector<double> PyRainflow::rotatePeaks(std::vector<double>& peaks)
 		peaks.emplace_back(peaks[0]);
 	}
 
-	return getPeaks(peaks);
+	/* Ensure the data only contains turning points */
+	filterPeaks();
+
+	return;
 }
 
 
-void PyRainflow::rainflow3Points(std::vector<double>& peaks, std::map<std::pair<double, double>, double>& cycles)
+void PyRainflow::rainflow3Points()
 {
 	/* Ensure the data only contains turning points */
-	peaks = getPeaks(peaks);
+	filterPeaks();
 
-	/* Create temporary vector */
-	std::vector<double> rs;
+	/* Reset residue vector */
+	rs.clear();
 	rs.reserve(64);
 
 	/* Iterate through turning points */
@@ -213,7 +336,7 @@ void PyRainflow::rainflow3Points(std::vector<double>& peaks, std::map<std::pair<
 		}
 	}
 
-	/* Residu */
+	/* residue */
 	for (size_t i = 0; i < rs.size() - 1; ++i)
 	{
 		double delta = round(std::abs(rs[i] - rs[i + 1]));
@@ -223,49 +346,60 @@ void PyRainflow::rainflow3Points(std::vector<double>& peaks, std::map<std::pair<
 			cycles[std::make_pair(delta, mean)] += 0.5;
 	}
 
+	rs.clear();
 	peaks.clear();
 }
 
 
-std::vector<double> PyRainflow::rainflow4Points(std::vector<double>& peaks, std::map<std::pair<double, double>, double>& cycles, bool residu, size_t multiplier)
+void PyRainflow::rainflow4Points(bool process_residue, size_t multiplier)
 {
 	/* Ensure the data only contains turning points */
-	peaks = getPeaks(peaks);
+	filterPeaks();
 
-	/* Create temporary vector */
-	std::vector<double> rs;
+	/* Reset residue vector */
+	rs.clear();
 	rs.reserve(64);
 
-	/* Iterate through turning points */
-	for (size_t i = 0; i < peaks.size(); ++i)
+	/* Perform procedure twice, first peaks, then residue */
+	for (int c = 0; c < 1 + int(process_residue); ++c)
 	{
-		rs.emplace_back(peaks[i]);
-		size_t sz = rs.size();
-
-		while ((sz >= 4) && (std::min<double>(rs[sz - 3], rs[sz - 2]) >= std::min<double>(rs[sz - 4], rs[sz - 1])) && (std::max<double>(rs[sz - 3], rs[sz - 2]) <= std::max<double>(rs[sz - 4], rs[sz - 1])))
+		/* Process residue */
+		if (c > 0)
 		{
-			double delta = round(std::abs(rs[sz - 3] - rs[sz - 2]));
-			double mean = round(0.5 * (rs[sz - 3] + rs[sz - 2]));
+			peaks = rs;
+			peaks.insert(peaks.end(), peaks.begin(), peaks.end());
+			rs.clear();
 
-			if (delta >= deltaCutOff)
-				cycles[std::pair<double, double>(delta, mean)] += 1.0 * multiplier;
+			filterPeaks();
+		}
 
-			/* Full cycle */
-			rs.erase(rs.end() - 3, rs.end() - 1);
-			sz = rs.size();
+		/* Iterate through turning points */
+		for (size_t i = 0; i < peaks.size(); ++i)
+		{
+			rs.emplace_back(peaks[i]);
+			size_t sz = rs.size();
+
+			while ((sz >= 4) && (std::min<double>(rs[sz - 3], rs[sz - 2]) >= std::min<double>(rs[sz - 4], rs[sz - 1])) && (std::max<double>(rs[sz - 3], rs[sz - 2]) <= std::max<double>(rs[sz - 4], rs[sz - 1])))
+			{
+				double delta = round(std::abs(rs[sz - 3] - rs[sz - 2]));
+				double mean = round(0.5 * (rs[sz - 3] + rs[sz - 2]));
+
+				if (delta >= deltaCutOff)
+					cycles[std::pair<double, double>(delta, mean)] += 1.0 * multiplier;
+
+				/* Full cycle */
+				rs.erase(rs.end() - 3, rs.end() - 1);
+				sz = rs.size();
+			}
 		}
 	}
 
-	/* Process residu */
-	if (residu)
-	{
-		rs.insert(rs.end(), rs.begin(), rs.end());
-		rainflow4Points(rs, cycles, false);
+	/* Clear residue only if processed */
+	if (process_residue)
 		rs.clear();
-	}
 
 	peaks.clear();
-	return rs;
+	return;
 }
 
 
@@ -313,7 +447,11 @@ void PyRainflow::randomiseOrder(PyObject* histories, std::vector<size_t>* ihisto
 }
 
 
-void PyRainflow::rainflow4PointConcurrent(unsigned it, std::vector< std::unique_ptr<std::vector<double>> >* tresidues, std::vector<size_t>* ihistories, std::vector< std::unique_ptr<std::vector<double>> >* residues, std::vector< std::unique_ptr<std::map<std::pair<double, double>, double>> >* tcycles)
+void PyRainflow::rainflow4PointConcurrent(double tolerance, double cutoff, unsigned it,
+	std::vector<size_t>* ihistories,
+	std::vector< std::unique_ptr<std::vector<double>> >* residues,
+	std::vector< std::unique_ptr<std::vector<double>> >* tresidues,
+	std::vector< std::unique_ptr<std::map<std::pair<double, double>, double>> >* tcycles)
 {
 	/* Define range of loop */
 	size_t nthreads = tresidues->size();
@@ -329,11 +467,6 @@ void PyRainflow::rainflow4PointConcurrent(unsigned it, std::vector< std::unique_
 	if (istart >= iend)
 		return;
 
-	/* Use unique pointers for dealing with memory allocation */
-	std::unique_ptr<std::vector<double>> rs = std::make_unique<std::vector<double>>(std::vector<double>());
-	rs->reserve(64);
-	std::unique_ptr<std::map<std::pair<double, double>, double>> cycles = std::make_unique<std::map<std::pair<double, double>, double>>(std::map<std::pair<double, double>, double>());
-
 	/* Determine size of peaks vector */
 	size_t szsum = 0;
 	size_t szmax = 0;
@@ -345,14 +478,18 @@ void PyRainflow::rainflow4PointConcurrent(unsigned it, std::vector< std::unique_
 
 	/* Try to limit size of peaks vector to 64 MB */
 	size_t nthreshold = std::min<size_t>(szsum, std::max<size_t>(szmax, 64 * 131072));
-	std::vector<double> peaks;
-	peaks.reserve(nthreshold);
+	std::vector<double> tpeaks;
+	tpeaks.reserve(nthreshold);
+	std::vector<double> trs;
+	trs.reserve(64);
+
+	PyRainflow iRf(tolerance, cutoff);
 
 	/* Append turning points and process signal when size reaches nthreshold or end */
 	for (size_t i = istart; i < iend; ++i)
 	{
 		/* Append next stress history/residue */
-		peaks.insert(peaks.end(), residues->at(ihistories->at(i))->begin(), residues->at(ihistories->at(i))->end());
+		tpeaks.insert(tpeaks.end(), residues->at(ihistories->at(i))->begin(), residues->at(ihistories->at(i))->end());
 
 		/* Size of vector to be added in next iteration */
 		size_t sznext = 0;
@@ -360,26 +497,27 @@ void PyRainflow::rainflow4PointConcurrent(unsigned it, std::vector< std::unique_
 			sznext = residues->at(ihistories->at(i + 1))->size();
 
 		/* Process if size threshold will be exceeded in the next iteration or if this is the last iteration */
-		if ((peaks.size() + sznext > nthreshold) || (i == iend - 1))
+		if ((tpeaks.size() + sznext > nthreshold) || (i == iend - 1))
 		{
-			std::vector<double> irs = rainflow4Points(peaks, *cycles, false, 1);
-			rs->insert(rs->end(), irs.begin(), irs.end());
+			iRf.setPeaks(tpeaks);
+			iRf.rainflow4Points(false, 1);
+			trs.insert(trs.end(), iRf.rs.begin(), iRf.rs.end());
 		}
 	}
 
 	/* Store thread specific residue and cycle count */
-	tresidues->at(it) = move(rs);
-	tcycles->at(it) = move(cycles);
+	tresidues->at(it) = std::make_unique<std::vector<double>>(trs);
+	tcycles->at(it) = std::make_unique<std::map<std::pair<double, double>, double>>(iRf.cycles);
 }
 
 
 PyObject* __stdcall PyRainflow::PyGetPeaks(PyObject* values)
 {
-	std::vector<double> peaks = getPeaks(values);
+	std::vector<double> pypeaks = getPeaks(values);
 
-	PyObject* output = PyList_New(peaks.size());
-	for (int i = 0; i < peaks.size(); ++i)
-		PyList_SetItem(output, i, PyFloat_FromDouble(peaks[i]));
+	PyObject* output = PyList_New(pypeaks.size());
+	for (int i = 0; i < pypeaks.size(); ++i)
+		PyList_SetItem(output, i, PyFloat_FromDouble(pypeaks[i]));
 
 	return output;
 }
@@ -417,11 +555,11 @@ PyObject* __stdcall PyRainflow::PyGetPeakLocations(PyObject* xpositions, PyObjec
 		values.emplace_back(PyFloat_AsDouble(PyList_GetItem(yvalues, i)));
 
 	/* Create vectors */
-	std::vector<double> locations;
-	locations.reserve(psize);
+	std::vector<double> xlocs;
+	xlocs.reserve(psize);
 
-	std::vector<double> peaks;
-	peaks.reserve(psize);
+	std::vector<double> ypeaks;
+	ypeaks.reserve(psize);
 
 	/* Locate turning points and add to peaks vector */
 	for (size_t i = 1; i < values.size() - 1; ++i)
@@ -431,50 +569,50 @@ PyObject* __stdcall PyRainflow::PyGetPeakLocations(PyObject* xpositions, PyObjec
 
 		if ((std::abs(delta1) > 0.0) && (delta1 * delta2 <= 0.0))
 		{
-			if (peaks.size() == 0)
+			if (ypeaks.size() == 0)
 			{
-				locations.emplace_back(positions[i - 1]);
-				peaks.emplace_back(values[i - 1]);
+				xlocs.emplace_back(positions[i - 1]);
+				ypeaks.emplace_back(values[i - 1]);
 			}
-			else if (peaks.size() >= 2)
+			else if (ypeaks.size() >= 2)
 			{
-				double point1 = peaks[peaks.size() - 2];
-				double point2 = peaks.back();
+				double point1 = ypeaks[ypeaks.size() - 2];
+				double point2 = ypeaks.back();
 				double point3 = values[i];
 
 				if (point2 >= std::min<double>(point1, point3) && point2 <= std::max<double>(point1, point3))
 				{
-					locations.pop_back();
-					peaks.pop_back();
+					xlocs.pop_back();
+					ypeaks.pop_back();
 				}
 			}
 
-			locations.emplace_back(positions[i]);
-			peaks.emplace_back(values[i]);
+			xlocs.emplace_back(positions[i]);
+			ypeaks.emplace_back(values[i]);
 		}
 	}
 
 	/* Add last value to peaks vector if delta is non-zero */
-	double delta = values.back() - peaks.back();
+	double delta = values.back() - ypeaks.back();
 	if (std::abs(delta) > 0.0)
 	{
-		locations.emplace_back(positions.back());
-		peaks.emplace_back(values.back());
+		xlocs.emplace_back(positions.back());
+		ypeaks.emplace_back(values.back());
 	}
 
 	/* Output */
-	psize = locations.size();
-	PyObject* locs = PyList_New(psize);
-	PyObject* pks = PyList_New(psize);
+	psize = xlocs.size();
+	PyObject* pylocs = PyList_New(psize);
+	PyObject* pypeaks = PyList_New(psize);
 
 	for (size_t i = 0; i < psize; ++i)
 	{
-		PyList_SetItem(locs, i, PyFloat_FromDouble(locations[i]));
-		PyList_SetItem(pks, i, PyFloat_FromDouble(peaks[i]));
+		PyList_SetItem(pylocs, i, PyFloat_FromDouble(xlocs[i]));
+		PyList_SetItem(pypeaks, i, PyFloat_FromDouble(ypeaks[i]));
 	}
 
-	PyTuple_SetItem(output, 0, locs);
-	PyTuple_SetItem(output, 1, pks);
+	PyTuple_SetItem(output, 0, pylocs);
+	PyTuple_SetItem(output, 1, pypeaks);
 
 	return output;
 }
@@ -483,39 +621,34 @@ PyObject* __stdcall PyRainflow::PyGetPeakLocations(PyObject* xpositions, PyObjec
 PyObject* __stdcall PyRainflow::PyRainflowCounting(PyObject* values, int algorithm, double tolerance, double cutoff)
 {
 	/* Define tolerance for rounding and cutoff for output */
-	PyRainflow Rf(tolerance, cutoff);
-
-	/* Filter peaks and valleys */
-	std::vector<double> peaks = getPeaks(values);
+	PyRainflow Rf(values, tolerance, cutoff);
 
 	/* Rainflow counting */
-	std::map<std::pair<double, double>, double> cycles;
-
 	switch (algorithm)
 	{
 		/* 3-points, non-periodic */
 	case 1:
-		Rf.rainflow3Points(peaks, cycles);
+		Rf.rainflow3Points();
 		break;
 
 		/* 3-points, periodic */
 	case 2:
-		peaks = rotatePeaks(peaks);
-		Rf.rainflow3Points(peaks, cycles);
+		Rf.rotatePeaks();
+		Rf.rainflow3Points();
 		break;
 
 		/* 4-points, periodic */
 	default:
-		Rf.rainflow4Points(peaks, cycles);
+		Rf.rainflow4Points();
 	}
 
 	/* Output */
-	PyObject* rdelta = PyList_New(Py_ssize_t(cycles.size()));
-	PyObject* rmean = PyList_New(Py_ssize_t(cycles.size()));
-	PyObject* rcount = PyList_New(Py_ssize_t(cycles.size()));
+	PyObject* rdelta = PyList_New(Py_ssize_t(Rf.cycles.size()));
+	PyObject* rmean = PyList_New(Py_ssize_t(Rf.cycles.size()));
+	PyObject* rcount = PyList_New(Py_ssize_t(Rf.cycles.size()));
 
 	size_t i = 0;
-	for (std::map<std::pair<double, double>, double>::iterator itr = cycles.begin(); itr != cycles.end(); ++itr)
+	for (std::map<std::pair<double, double>, double>::iterator itr = Rf.cycles.begin(); itr != Rf.cycles.end(); ++itr)
 	{
 		PyList_SetItem(rdelta, i, PyFloat_FromDouble(itr->first.first));
 		PyList_SetItem(rmean, i, PyFloat_FromDouble(itr->first.second));
@@ -533,29 +666,32 @@ PyObject* __stdcall PyRainflow::PyRainflowCounting(PyObject* values, int algorit
 
 PyObject* __stdcall PyRainflow::PyRainflowCountingRandomOrder(PyObject* histories, double tolerance, double cutoff, bool randomise, bool verify)
 {
-	/* Define tolerance for rounding and cutoff for output */
-	PyRainflow Rf(tolerance, cutoff);
-
 	/* Randomise order of stress histories on a separate thread */
 	size_t nhistories = PyList_Size(histories);
 	std::vector<size_t> ihistories;
 	std::thread t0(&randomiseOrder, histories, &ihistories, randomise);
 
-	/* Perform rainflow counting on stress histories and save residu's for randomised order */
-	std::map<std::pair<double, double>, double> cycles;
+	PyRainflow RfAll(tolerance, cutoff);
+
+	/* Perform rainflow counting on stress histories and save residue's for randomised order */
 	std::vector< std::unique_ptr<std::vector<double>> > residues(nhistories);
 
 	for (size_t i = 0; i < nhistories; ++i)
 	{
 		PyObject* item = PyList_GetItem(histories, i);
 		size_t nmul = PyLong_AsUnsignedLongLong(PyList_GetItem(item, 0));
-		std::vector<double> values = getPeaks(PyList_GetItem(item, 1));
+		PyObject* values = PyList_GetItem(item, 1);
+
+		PyRainflow iRf(values, tolerance, cutoff);
 
 		/* Iterate through turning points */
-		std::unique_ptr<std::vector<double>> rs = std::make_unique<std::vector<double>>(Rf.rainflow4Points(values, cycles, false, nmul));
+		iRf.rainflow4Points(false, nmul);
 
-		/* Store residu */
-		residues[i] = move(rs);
+		/* Combine cycle counts */
+		RfAll.addCycles(iRf.cycles);
+
+		/* Store residue */
+		residues[i] = std::make_unique<std::vector<double>>(iRf.rs);
 	}
 
 	/* Join thread before processing residues */
@@ -573,8 +709,7 @@ PyObject* __stdcall PyRainflow::PyRainflowCountingRandomOrder(PyObject* historie
 	/* Start threads */
 	std::vector< std::unique_ptr<std::thread> > threads(nthreads);
 	for (unsigned it = 0; it < nthreads; ++it)
-		threads[it] = std::make_unique<std::thread>(std::thread([&Rf, it, &tresidues, &ihistories, &residues, &tcycles] () { Rf.rainflow4PointConcurrent(it, &tresidues, &ihistories, &residues, &tcycles); }));
-		//threads[it] = std::make_unique<std::thread>(std::thread(&PyRainflow::rainflow4PointConcurrent, it, &tresidues, &ihistories, &residues, &tcycles));
+		threads[it] = std::make_unique<std::thread>(std::thread(&PyRainflow::rainflow4PointConcurrent, tolerance, cutoff, it, &ihistories, &residues, &tresidues, &tcycles));
 
 	/* Wait for threads to finish */
 	for (unsigned it = 0; it < nthreads; ++it)
@@ -587,14 +722,13 @@ PyObject* __stdcall PyRainflow::PyRainflowCountingRandomOrder(PyObject* historie
 		ihistories.clear();
 
 	/* Combine thread residues and cycle counts */
-	std::vector<double> allresidues(nthreads * 8);
+	std::vector<double> allresidues;
+	allresidues.reserve(nthreads * 16);
 
 	for (unsigned it = 0; it < nthreads; ++it)
 	{
 		allresidues.insert(allresidues.end(), tresidues[it]->begin(), tresidues[it]->end());
-
-		for (std::map<std::pair<double, double>, double>::iterator itr = tcycles[it]->begin(); itr != tcycles[it]->end(); ++itr)
-			cycles[itr->first] += itr->second;
+		RfAll.addCycles(*tcycles[it]);
 	}
 
 	/* Free memory */
@@ -602,11 +736,15 @@ PyObject* __stdcall PyRainflow::PyRainflowCountingRandomOrder(PyObject* historie
 	tcycles.clear();
 
 	/* Process concatenated thread residues */
-	Rf.rainflow4Points(allresidues, cycles);
+	RfAll.setPeaks(allresidues);
+	RfAll.rainflow4Points();
+
 
 	/* Verify results (SLOW) */
 	if (verify)
 	{
+		PyRainflow RfVerify(tolerance, cutoff);
+
 		/* Get total size of concatenated stress histories */
 		size_t sztotal = 0;
 		for (size_t i = 0; i < nhistories; ++i)
@@ -626,7 +764,6 @@ PyObject* __stdcall PyRainflow::PyRainflowCountingRandomOrder(PyObject* historie
 		else
 			std::cout << "\t\tPhysical memory to be used: " << (2 * nthreshold / 128) << "KB" << std::endl;
 
-		std::map<std::pair<double, double>, double> v_cycles;
 		std::vector<double> v_allpeaks;
 		v_allpeaks.reserve(nthreshold);
 		std::vector<double> v_allresidues;
@@ -638,10 +775,11 @@ PyObject* __stdcall PyRainflow::PyRainflowCountingRandomOrder(PyObject* historie
 		{
 			/* Get stress history */
 			PyObject* item = PyList_GetItem(histories, ihistories[i]);
-			std::vector<double> peaks = getPeaks(PyList_GetItem(item, 1));
+			PyObject* values = PyList_GetItem(item, 1);
+			std::vector<double> vpeaks = getPeaks(values);
 
 			/* Append stress history */
-			v_allpeaks.insert(v_allpeaks.end(), peaks.begin(), peaks.end());
+			v_allpeaks.insert(v_allpeaks.end(), vpeaks.begin(), vpeaks.end());
 
 			/* Size of vector to be added in next iteration */
 			size_t sznext = 0;
@@ -653,25 +791,30 @@ PyObject* __stdcall PyRainflow::PyRainflowCountingRandomOrder(PyObject* historie
 			if ((lastiteration && processed) || (v_allpeaks.size() + sznext > nthreshold))
 			{
 				processed = true;
-				std::vector<double> rs = Rf.rainflow4Points(v_allpeaks, v_cycles, false, 1);
-				v_allresidues.insert(v_allresidues.end(), rs.begin(), rs.end());
+				RfVerify.setPeaks(v_allpeaks);
+				RfVerify.rainflow4Points(false, 1);
+				v_allresidues.insert(v_allresidues.end(), RfVerify.rs.begin(), RfVerify.rs.end());
 
 				/* Process residue at last iteration */
 				if (lastiteration)
-					Rf.rainflow4Points(v_allresidues, v_cycles);
+				{
+					RfVerify.setPeaks(v_allresidues);
+					RfVerify.rainflow4Points();
+				}
 			}
 
 			/* Process entire signal at once with 3-points, periodic algorithm */
 			else if (lastiteration && !processed)
 			{
-				v_allpeaks = rotatePeaks(v_allpeaks);
-				Rf.rainflow3Points(v_allpeaks, v_cycles);
+				RfVerify.setPeaks(v_allpeaks);
+				RfVerify.rotatePeaks();
+				RfVerify.rainflow3Points();
 				std::cout << "\t\tProcessed entire randomised stress history in one pass for verification" << std::endl;
 			}
 		}
 
 		/* Compare cycles */
-		if (v_cycles != cycles)
+		if (RfVerify.cycles != RfAll.cycles)
 			std::cerr << "\t\tCycle counts don't match!" << std::endl;
 		else
 			std::cout << "\t\tCycle counts successfully verified" << std::endl;
@@ -681,12 +824,12 @@ PyObject* __stdcall PyRainflow::PyRainflowCountingRandomOrder(PyObject* historie
 	}
 
 	/* Output */
-	PyObject* rdelta = PyList_New(Py_ssize_t(cycles.size()));
-	PyObject* rmean = PyList_New(Py_ssize_t(cycles.size()));
-	PyObject* rcount = PyList_New(Py_ssize_t(cycles.size()));
+	PyObject* rdelta = PyList_New(Py_ssize_t(RfAll.cycles.size()));
+	PyObject* rmean = PyList_New(Py_ssize_t(RfAll.cycles.size()));
+	PyObject* rcount = PyList_New(Py_ssize_t(RfAll.cycles.size()));
 
 	size_t i = 0;
-	for (std::map<std::pair<double, double>, double>::iterator itr = cycles.begin(); itr != cycles.end(); ++itr)
+	for (std::map<std::pair<double, double>, double>::iterator itr = RfAll.cycles.begin(); itr != RfAll.cycles.end(); ++itr)
 	{
 		PyList_SetItem(rdelta, i, PyFloat_FromDouble(itr->first.first));
 		PyList_SetItem(rmean, i, PyFloat_FromDouble(itr->first.second));

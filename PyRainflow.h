@@ -7,6 +7,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
+#define Py_LIMITED_API
 #ifdef _DEBUG
 	#undef _DEBUG
 	#include <python.h>
@@ -14,7 +15,6 @@
 #else
 	#include <python.h>
 #endif
-#define Py_LIMITED_API
 
 
 class PyRainflow
@@ -23,10 +23,18 @@ class PyRainflow
 private:
 
 	double roundingTolerance, deltaCutOff;
+	std::vector<double> peaks, rs;
+	std::map<std::pair<double, double>, double> cycles;
 
 public:
 
 	PyRainflow(double tolerance = 1e-9, double cutoff = 1e-3);
+
+	PyRainflow(PyObject* values, double tolerance = 1e-9, double cutoff = 1e-3);
+
+	PyRainflow(std::vector<double>& values, double tolerance = 1e-9, double cutoff = 1e-3);
+
+	PyRainflow(std::vector<double>& values, std::map<std::pair<double, double>, double>& cycles, double tolerance = 1e-9, double cutoff = 1e-3);
 
 	~PyRainflow();
 
@@ -36,28 +44,38 @@ private:
 
 	void setCutOff(double cutoff);
 
-	double round(double val);
+	double round(double value);
 
 	static size_t getAvailablePhysicalMemory();
 
-	static bool isPeaksOnly(std::vector<double>& peaks);
+	void addCycles(std::map<std::pair<double, double>, double>& counts);
+
+	static bool isPeaksOnly(std::vector<double>& values);
+
+	bool isPeaksOnly();
 
 	static std::vector<double> getPeaks(std::vector<double>& values);
 
 	static std::vector<double> getPeaks(PyObject* values);
 
-	static std::vector<double> rotatePeaks(std::vector<double>& peaks);
+	void setPeaks(std::vector<double>& values);
 
-	void rainflow3Points(std::vector<double>& peaks, std::map<std::pair<double, double>, double>& cycles);
+	void filterPeaks();
 
-	std::vector<double> rainflow4Points(std::vector<double>& peaks, std::map<std::pair<double, double>, double>& cycles,
-		bool residu = true, size_t multiplier = 1);
+	void rotatePeaks();
+
+	void rainflow3Points();
+
+	void rainflow4Points(bool process_residue = true, size_t multiplier = 1);
 
 	static void randomiseOrder(PyObject* histories, std::vector<size_t>* ihistories, bool randomise = true);
 
-	void rainflow4PointConcurrent(unsigned it, std::vector< std::unique_ptr<std::vector<double>> >* tresidues,
-		std::vector<size_t>* ihistories, std::vector< std::unique_ptr<std::vector<double>> >* residues,
+	static void rainflow4PointConcurrent(double tolerance, double cutoff, unsigned it,
+		std::vector<size_t>* ihistories,
+		std::vector< std::unique_ptr<std::vector<double>> >* residues,
+		std::vector< std::unique_ptr<std::vector<double>> >* tresidues,
 		std::vector< std::unique_ptr<std::map<std::pair<double, double>, double>> >* tcycles);
+
 
 public:
 
