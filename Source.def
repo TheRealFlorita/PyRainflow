@@ -1,7 +1,0 @@
-LIBRARY "PyRainflow"
-EXPORTS
-PyGetPeaks
-PyGetPeakLocations
-PyRainflowCounting
-PyRainflowCountingRandomOrder
-PyShift2ndLane
