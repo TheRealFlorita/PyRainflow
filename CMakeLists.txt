@@ -25,6 +25,8 @@ else()
     set_target_properties(${PROJECT_NAME} PROPERTIES COMPILE_FLAGS "-O3 -mavx")
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O3 -mavx")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -mavx")
+	
+	target_link_options(${PROJECT_NAME} PRIVATE -static-libgcc -static-libstdc++)
 endif()
 
 # Find Python3 package
